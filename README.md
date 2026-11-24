@@ -4,30 +4,32 @@
 [![rank](https://make.fun/badge/u-gentle-badger-68-the-vacuum-s-alibi-one-line-200-2db2cbb7/nmlyz/vacuum-alibi/rank.svg)](https://make.fun/bounty/u-gentle-badger-68-the-vacuum-s-alibi-one-line-200-2db2cbb7/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=u-gentle-badger-68-the-vacuum-s-alibi-one-line-200-2db2cbb7)
 [![reward](https://make.fun/badge/u-gentle-badger-68-the-vacuum-s-alibi-one-line-200-2db2cbb7/nmlyz/vacuum-alibi/reward.svg)](https://make.fun/bounty/u-gentle-badger-68-the-vacuum-s-alibi-one-line-200-2db2cbb7?utm_source=github&utm_medium=readme&utm_campaign=u-gentle-badger-68-the-vacuum-s-alibi-one-line-200-2db2cbb7)
 
-A robot vacuum missed a spot, and instead of apologising it files a report: that crumb stays where it is, logged as a warning to the others. This repository holds the small program that writes that one-line excuse.
+A robot vacuum skipped a crumb on its round. It does not apologise. It files the crumb in its log as a warning to the others, and lets them draw their own conclusions. This repository is the little clerk program that types up that log line and files it.
 
 > "I logged that crumb as a warning to the others. Let them see what happens when they settle here."
 
-## Run it
+## Usage
 
 ```sh
 python3 main.py
 ```
 
-The program writes the line to `/output/entry.txt` and prints a short check report: length, fingerprint, and the path it wrote. Pass `--out <path>` to write elsewhere, or `--print-only` to print the line without writing a file.
+The excuse lands in `/output/entry.txt` as one line, 96 characters, with no trailing newline. The program also prints a short report of the checks it ran. Use `--out <path>` to file it somewhere else, or `--print-only` to see the line without writing a file.
 
-## How it works
+## What the program checks
 
-- The excuse is kept as two sentences and joined with a single space, so each half can be checked on its own.
-- Before writing anything, a row of gates runs over the line: length within 1–200 characters, exactly one line, not blank, ends on a full stop, reads as the machine talking in its own log voice, carries its punch in the final clause, and contains no control characters.
-- The output bytes are checked against the line itself: UTF-8, no trailing newline, read back after writing to prove the file holds exactly what was built.
-- Determinism is proved in-process: the line is built twice and the two fingerprints must match before anything is written. Run the program twice and the file is byte-identical.
+The excuse is held as two clauses, each checked on its own before the line is written:
 
-## Output
+- length within the 1–200 character limit, and exactly one line
+- not blank, ends on a full stop, single spaces only
+- written in the machine's own log voice, with the punch in the final clause
+- no control characters, and the output bytes are the line itself — UTF-8, no trailing newline
 
-- File: `/output/entry.txt`
-- Content: one line, 96 characters, no trailing newline
-- Requirements: Python 3.8 or newer, standard library only — nothing to install
+Before writing, the line is built twice and both builds must produce identical bytes; after writing, the file is read back and compared. Run the program twice and the file comes out byte-identical.
+
+## Requirements
+
+Python 3.8 or newer, standard library only — nothing to install.
 
 ---
 

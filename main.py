@@ -1,162 +1,167 @@
 #!/usr/bin/env python3
-"""vacuum-alibi -- one deadpan excuse from a robot vacuum.
+"""vacuum-alibi: the vacuum files its excuse instead of saying sorry.
 
-A robot vacuum missed a spot. It does not apologise; it files a report.
-This program assembles that report -- a single line, at most 200
-characters -- checks it against every rule the bounty sets for the
-output file, and writes it to /output/entry.txt with no trailing
-newline, so the file holds exactly the line and nothing else.
+A robot vacuum skipped a crumb on its round. Rather than apologise,
+it logs the crumb as a warning to every crumb that might settle there
+next. This script is the clerk that types up that log line: it puts
+the excuse together, puts it through its paces, and files it in
+/output/entry.txt as exactly one line, with nothing after it -- not
+even a newline.
 
-Only the Python standard library is used. Running the program twice
-produces byte-identical output: the line is fixed text, the checks
-are pure functions of that text, and nothing here reads the clock,
-the environment, or the network.
+Everything here is plain standard library, and the result never
+changes between runs: the wording is fixed, the checks only look at
+the wording, and the script never consults the clock, the network,
+or the environment.
 """
 
 import argparse
 import hashlib
-import os
 import sys
+from pathlib import Path
 
-# The bounty caps an entry at 200 characters and requires at least one.
-LIMIT_CHARS = 200
-MIN_CHARS = 1
+# The bounty allows a single line of 1 to 200 characters.
+CHAR_CAP = 200
+CHAR_FLOOR = 1
 
-# Where the judge looks for the entry.
-DEFAULT_OUT = "/output/entry.txt"
+# The judge reads the entry from here unless told otherwise.
+DEFAULT_TARGET = "/output/entry.txt"
 
-# The excuse itself, kept as two sentences so each can be checked on
-# its own before they are joined. Joined with a single space the two
-# sentences come to 96 characters, inside the 200-character cap.
-SENTENCES = (
+# The excuse, in two clauses. Each clause is checked on its own, then
+# the two are set side by side with one space between them. Together
+# they run to 96 characters, comfortably inside the 200-character cap.
+CLAUSES = [
     "I logged that crumb as a warning to the others.",
     "Let them see what happens when they settle here.",
-)
+]
 
 
-def join_sentences(sentences):
-    """Glue the sentences into the single entry line."""
-    return " ".join(part.strip() for part in sentences)
+class Excuse:
+    """One excuse line, from its clauses to the bytes on disk."""
+
+    def __init__(self, clauses):
+        self.clauses = [clause.strip() for clause in clauses]
+
+    @property
+    def line(self):
+        """The two clauses joined with a single space."""
+        return " ".join(self.clauses)
+
+    @property
+    def payload(self):
+        """The line as UTF-8 bytes, with no trailing newline added."""
+        return self.line.encode("utf-8")
+
+    @property
+    def digest(self):
+        """Short stable fingerprint of the exact output bytes."""
+        return hashlib.sha256(self.payload).hexdigest()
+
+    def rebuild(self):
+        """A second, independent build for the determinism proof."""
+        return Excuse(list(self.clauses))
 
 
-def build_entry():
-    """Return the entry line exactly as it must be written."""
-    return join_sentences(SENTENCES)
+# --- checks: each takes an Excuse and returns (label, passed, note) ---
 
 
-def count_chars(text):
-    """Character count the way the gate counts it: code points."""
-    return len(text)
+def check_length(excuse):
+    n = len(excuse.line)
+    ok = CHAR_FLOOR <= n <= CHAR_CAP
+    return ("length", ok, "%d characters (cap %d)" % (n, CHAR_CAP))
 
 
-def encode_entry(text):
-    """Encode the line as UTF-8 bytes, adding no trailing newline."""
-    return text.encode("utf-8")
+def check_one_line(excuse):
+    ok = "\n" not in excuse.line and "\r" not in excuse.line
+    return ("one-line", ok, "no line breaks inside the entry")
 
 
-def fingerprint(data):
-    """Short, stable fingerprint of the exact output bytes."""
-    return hashlib.sha256(data).hexdigest()
+def check_not_empty(excuse):
+    ok = bool(excuse.line.strip())
+    return ("not-empty", ok, "the entry is not only whitespace")
 
 
-# --- gates: each one returns (label, passed, note) -----------------------
+def check_full_stop(excuse):
+    ok = excuse.line.endswith(".")
+    return ("full-stop", ok, "the excuse ends on a full stop")
 
 
-def gate_length(text):
-    n = count_chars(text)
-    ok = MIN_CHARS <= n <= LIMIT_CHARS
-    return ("length", ok, "%d characters (limit %d)" % (n, LIMIT_CHARS))
+def check_log_voice(excuse):
+    ok = excuse.line.startswith("I logged")
+    return ("log-voice", ok, "the machine speaks in its own log voice")
 
 
-def gate_single_line(text):
-    ok = "\n" not in text and "\r" not in text
-    return ("single-line", ok, "no line breaks inside the entry")
+def check_punch_last(excuse):
+    ok = excuse.clauses[-1].startswith("Let them see")
+    return ("punch-last", ok, "the punch sits in the final clause")
 
 
-def gate_not_blank(text):
-    ok = bool(text.strip())
-    return ("not-blank", ok, "the entry is not only whitespace")
-
-
-def gate_terminator(text):
-    ok = text.endswith(".")
-    return ("terminator", ok, "the excuse ends on a full stop")
-
-
-def gate_machine_voice(text):
-    ok = text.startswith("I logged")
-    return ("machine-voice", ok, "the machine speaks in its own log voice")
-
-
-def gate_punch_at_end(text):
-    ok = text.rsplit(". ", 1)[-1].startswith("Let them see")
-    return ("punch-at-end", ok, "the punch sits in the final clause")
-
-
-def gate_no_control_chars(text):
-    bad = [ch for ch in text if ord(ch) < 0x20 or ord(ch) == 0x7F]
+def check_no_controls(excuse):
+    bad = [ch for ch in excuse.line if ord(ch) < 0x20 or ord(ch) == 0x7F]
     ok = not bad
-    return ("no-control-chars", ok, "no control characters present")
+    return ("no-controls", ok, "no control characters present")
 
 
-def gate_bytes_match(text, data):
-    ok = data == text.encode("utf-8") and not data.endswith(b"\n")
-    return ("bytes-match", ok, "output bytes are the line, no trailing newline")
+def check_spacing(excuse):
+    ok = "  " not in excuse.line
+    return ("spacing", ok, "single spaces only between words")
 
 
-GATES = (
-    gate_length,
-    gate_single_line,
-    gate_not_blank,
-    gate_terminator,
-    gate_machine_voice,
-    gate_punch_at_end,
-    gate_no_control_chars,
+def check_payload(excuse):
+    ok = excuse.payload == excuse.line.encode("utf-8")
+    ok = ok and not excuse.payload.endswith(b"\n")
+    return ("payload", ok, "output bytes are the line, no trailing newline")
+
+
+CHECKS = (
+    check_length,
+    check_one_line,
+    check_not_empty,
+    check_full_stop,
+    check_log_voice,
+    check_punch_last,
+    check_no_controls,
+    check_spacing,
+    check_payload,
 )
 
 
-def run_gates(text, data):
-    """Run every gate; return the list of results, failures included."""
-    results = [gate(text) for gate in GATES]
-    results.append(gate_bytes_match(text, data))
-    return results
+def run_checks(excuse):
+    """Run every check; failures are reported, not hidden."""
+    return [check(excuse) for check in CHECKS]
 
 
-def prove_deterministic(text):
-    """Build the output twice in-process and compare fingerprints.
+def prove_stable(excuse):
+    """Build the entry twice and demand identical bytes.
 
-    The line is fixed text, so two independent builds must hash the
+    The wording is fixed, so two independent builds must hash the
     same. A mismatch would mean the build depends on something it
-    must not depend on, and the run fails before anything is written.
+    must not depend on, and the run stops before anything is written.
     """
-    first = fingerprint(encode_entry(text))
-    second = fingerprint(encode_entry(build_entry()))
-    if first != second:
+    again = excuse.rebuild()
+    if again.payload != excuse.payload or again.digest != excuse.digest:
         raise SystemExit("determinism check failed: two builds differ")
-    return first
+    return excuse.digest
 
 
-def persist_entry(path, data):
-    """Write the exact bytes to path, creating its folder if needed."""
-    folder = os.path.dirname(path)
-    if folder:
-        os.makedirs(folder, exist_ok=True)
-    with open(path, "wb") as handle:
-        handle.write(data)
-    with open(path, "rb") as handle:
-        written = handle.read()
-    if written != data:
-        raise SystemExit("read-back check failed: %s differs" % path)
+def file_entry(target, excuse):
+    """Write the exact bytes, then read them back and compare."""
+    path = Path(target)
+    if path.parent != Path("."):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(excuse.payload)
+    written = path.read_bytes()
+    if written != excuse.payload:
+        raise SystemExit("read-back check failed: %s differs" % target)
     return written
 
 
-def parse_args(argv):
+def parse_cli(argv):
     parser = argparse.ArgumentParser(
-        description="Write the vacuum's one-line excuse to entry.txt."
+        description="File the vacuum's one-line excuse as entry.txt."
     )
     parser.add_argument(
         "--out",
-        default=DEFAULT_OUT,
+        default=DEFAULT_TARGET,
         help="destination file (default: %(default)s)",
     )
     parser.add_argument(
@@ -172,34 +177,33 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
-def report(results, digest, path, quiet):
+def summarise(results, digest, excuse, target, quiet):
     failed = [r for r in results if not r[1]]
     if not quiet:
         for label, passed, note in results:
             mark = "ok  " if passed else "FAIL"
-            print("[%s] %-18s %s" % (mark, label, note))
+            print("[%s] %-14s %s" % (mark, label, note))
         print("sha256: %s" % digest)
-        if path:
-            print("wrote:  %s" % path)
+        if target:
+            print("wrote:  %s" % target)
     if failed:
         names = ", ".join(label for label, _, _ in failed)
-        raise SystemExit("gates failed: %s" % names)
+        raise SystemExit("checks failed: %s" % names)
     print("entry valid: %d characters, sha256 %s" % (
-        count_chars(build_entry()), digest[:12]))
+        len(excuse.line), digest[:12]))
     return 0
 
 
 def main(argv=None):
-    args = parse_args(argv)
-    text = build_entry()
-    data = encode_entry(text)
-    digest = prove_deterministic(text)
-    results = run_gates(text, data)
+    args = parse_cli(argv)
+    excuse = Excuse(CLAUSES)
+    digest = prove_stable(excuse)
+    results = run_checks(excuse)
     if args.print_only:
-        print(text)
-        return report(results, digest, None, args.quiet)
-    persist_entry(args.out, data)
-    return report(results, digest, args.out, args.quiet)
+        print(excuse.line)
+        return summarise(results, digest, excuse, None, args.quiet)
+    file_entry(args.out, excuse)
+    return summarise(results, digest, excuse, args.out, args.quiet)
 
 
 if __name__ == "__main__":

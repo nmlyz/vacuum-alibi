@@ -1,286 +1,199 @@
 #!/usr/bin/env python3
-"""vacuum-alibi: write the vacuum's one-line alibi to /output/entry.txt.
+"""vacuum-alibi -- one deadpan excuse from a robot vacuum.
 
-One line, at most 200 characters: the excuse a robot vacuum gives
-for missing a spot. The line is built from two clauses, one per beat
-of the joke, and every clause is checked on its own before anything
-is written. Standard library only, no network. Deterministic: the
-same bytes on every run.
+A robot vacuum missed a spot. It does not apologise; it files a report.
+This program assembles that report -- a single line, at most 200
+characters -- checks it against every rule the bounty sets for the
+output file, and writes it to /output/entry.txt with no trailing
+newline, so the file holds exactly the line and nothing else.
+
+Only the Python standard library is used. Running the program twice
+produces byte-identical output: the line is fixed text, the checks
+are pure functions of that text, and nothing here reads the clock,
+the environment, or the network.
 """
 
+import argparse
+import hashlib
 import os
 import sys
 
-# The alibi, beat by beat. The setup gives the crumb a protected
-# status; the punch follows from that status, in the machine's own
-# voice, and ends on the machine admitting it is outclassed.
-SETUP_CLAUSE = "My lidar classified the crumb as a protected species."
-PUNCH_CLAUSE = "Relocating it needs a permit, a hearing, and a better vacuum than me."
-
-LINE = SETUP_CLAUSE + " " + PUNCH_CLAUSE
-
-# Gate limits from the bounty: one line, 1 to 200 characters.
+# The bounty caps an entry at 200 characters and requires at least one.
+LIMIT_CHARS = 200
 MIN_CHARS = 1
-MAX_CHARS = 200
 
-# Fingerprint of the chosen line, so a typo in either clause fails
-# loudly instead of shipping a different joke.
-EXPECTED_CHARS = 123
-EXPECTED_WORDS = 22
-EXPECTED_CLAUSES = 2
-EXPECTED_SENTENCES = 2
-EXPECTED_BYTES = 123
+# Where the judge looks for the entry.
+DEFAULT_OUT = "/output/entry.txt"
 
-# Each clause must carry its own load: the setup names the sensor,
-# the crumb and the new status; the punch names the red tape and
-# the machine's own shortcoming.
-SETUP_KEYWORDS = ("lidar", "crumb", "protected", "species")
-PUNCH_KEYWORDS = ("permit", "hearing", "vacuum")
-
-OUTPUT_NAME = "entry.txt"
-DEFAULT_OUTPUT_DIR = "/output"
-OUTPUT_ENV_VAR = "MAKEFUN_OUTPUT_DIR"
+# The excuse itself, kept as two sentences so each can be checked on
+# its own before they are joined. Joined with a single space the two
+# sentences come to 123 characters, inside the 200-character cap.
+SENTENCES = (
+    "My lidar classified the crumb as a protected species.",
+    "Relocating it needs a permit, a hearing, and a better vacuum than me.",
+)
 
 
-def split_clauses(text):
-    """Split the line into its clauses on sentence boundaries."""
-    parts = [part.strip() for part in text.split(". ")]
-    clauses = []
-    for part in parts:
-        if not part:
-            continue
-        if not part.endswith("."):
-            part = part + "."
-        clauses.append(part)
-    return clauses
+def join_sentences(sentences):
+    """Glue the sentences into the single entry line."""
+    return " ".join(part.strip() for part in sentences)
 
 
-def count_words(text):
-    """Count whitespace-separated words in the line."""
-    return len(text.split())
+def build_entry():
+    """Return the entry line exactly as it must be written."""
+    return join_sentences(SENTENCES)
 
 
-def clause_problems(clause, keywords, role):
-    """Return every problem with one clause of the alibi."""
-    found = []
-    if not clause:
-        found.append(f"{role} clause is empty")
-        return found
-    if not clause[0].isupper():
-        found.append(f"{role} clause must start with a capital letter")
-    if not clause.endswith("."):
-        found.append(f"{role} clause must end with a full stop")
-    if clause != clause.strip():
-        found.append(f"{role} clause must not start or end with white space")
-    if "  " in clause:
-        found.append(f"{role} clause must not contain a double space")
-    lowered = clause.lower()
-    for keyword in keywords:
-        if keyword.lower() not in lowered:
-            found.append(f"{role} clause is missing {keyword!r}")
-    return found
+def count_chars(text):
+    """Character count the way the gate counts it: code points."""
+    return len(text)
 
 
-def length_problems(text):
-    """Return every length-gate violation for the entry text."""
-    found = []
-    chars = len(text)
-    if not MIN_CHARS <= chars <= MAX_CHARS:
-        found.append(
-            f"entry is {chars} characters, must be {MIN_CHARS}-{MAX_CHARS}"
-        )
-    if chars != EXPECTED_CHARS:
-        found.append(
-            f"entry is {chars} characters, expected {EXPECTED_CHARS}"
-        )
-    if len(text.encode("utf-8")) != EXPECTED_BYTES:
-        found.append(
-            f"entry is {len(text.encode('utf-8'))} bytes, "
-            f"expected {EXPECTED_BYTES}"
-        )
-    if count_words(text) != EXPECTED_WORDS:
-        found.append(
-            f"entry is {count_words(text)} words, expected {EXPECTED_WORDS}"
-        )
-    return found
+def encode_entry(text):
+    """Encode the line as UTF-8 bytes, adding no trailing newline."""
+    return text.encode("utf-8")
 
 
-def shape_problems(text):
-    """Return every shape violation: one line, no stray white space."""
-    found = []
-    stripped = text.strip()
-    if not stripped:
-        found.append("entry must not be only white space")
-    if text != stripped:
-        found.append("entry must not start or end with white space")
-    if "\n" in text or "\r" in text:
-        found.append("entry must be a single line")
-    if "\t" in text:
-        found.append("entry must not contain a tab")
-    if text != " ".join(text.split()):
-        found.append("entry must use single spaces between words")
-    clauses = split_clauses(text)
-    if len(clauses) != EXPECTED_CLAUSES:
-        found.append(
-            f"entry has {len(clauses)} clauses, expected {EXPECTED_CLAUSES}"
-        )
-    if text.count(".") != EXPECTED_SENTENCES:
-        found.append(
-            f"entry has {text.count('.')} full stops, "
-            f"expected {EXPECTED_SENTENCES}"
-        )
-    return found
+def fingerprint(data):
+    """Short, stable fingerprint of the exact output bytes."""
+    return hashlib.sha256(data).hexdigest()
 
 
-def voice_problems(text):
-    """Return every voice violation: the machine, not the narrator."""
-    found = []
-    first_person = (
-        text.startswith("I ")
-        or text.startswith("My ")
-        or " I " in text
-        or " me" in text
-        or " my " in text
-    )
-    if not first_person:
-        found.append("entry must be spoken by the vacuum itself")
-    if "?" in text or "!" in text:
-        found.append("entry must stay deadpan: no question or exclamation")
-    if text.isascii() is False:
-        found.append("entry must be plain ASCII text")
-    return found
+# --- gates: each one returns (label, passed, note) -----------------------
 
 
-def problems(text):
-    """Return every gate violation for the entry text (empty is valid)."""
-    found = []
-    found.extend(length_problems(text))
-    found.extend(shape_problems(text))
-    found.extend(voice_problems(text))
-    clauses = split_clauses(text)
-    if len(clauses) == EXPECTED_CLAUSES:
-        found.extend(clause_problems(clauses[0], SETUP_KEYWORDS, "setup"))
-        found.extend(clause_problems(clauses[1], PUNCH_KEYWORDS, "punch"))
-        if clauses[0] != SETUP_CLAUSE:
-            found.append("setup clause does not match the chosen wording")
-        if clauses[1] != PUNCH_CLAUSE:
-            found.append("punch clause does not match the chosen wording")
-    return found
+def gate_length(text):
+    n = count_chars(text)
+    ok = MIN_CHARS <= n <= LIMIT_CHARS
+    return ("length", ok, "%d characters (limit %d)" % (n, LIMIT_CHARS))
 
 
-def describe(text):
-    """Summarise the entry for the run report."""
-    clauses = split_clauses(text)
-    return {
-        "characters": len(text),
-        "bytes": len(text.encode("utf-8")),
-        "words": count_words(text),
-        "clauses": len(clauses),
-        "setup_words": count_words(clauses[0]) if clauses else 0,
-        "punch_words": count_words(clauses[1]) if len(clauses) > 1 else 0,
-    }
+def gate_single_line(text):
+    ok = "\n" not in text and "\r" not in text
+    return ("single-line", ok, "no line breaks inside the entry")
 
 
-def output_dir():
-    """Resolve where entry.txt goes, honouring the harness override."""
-    return os.environ.get(OUTPUT_ENV_VAR) or DEFAULT_OUTPUT_DIR
+def gate_not_blank(text):
+    ok = bool(text.strip())
+    return ("not-blank", ok, "the entry is not only whitespace")
 
 
-def write_entry(text, directory):
-    """Write the entry file and return its path."""
-    os.makedirs(directory, exist_ok=True)
-    path = os.path.join(directory, OUTPUT_NAME)
-    with open(path, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(text)
-    return path
+def gate_terminator(text):
+    ok = text.endswith(".")
+    return ("terminator", ok, "the excuse ends on a full stop")
 
 
-def verify_written(path, text):
-    """Read the file back as bytes and confirm it matches exactly."""
+def gate_machine_voice(text):
+    ok = "vacuum" in text.lower() and "lidar" in text.lower()
+    return ("machine-voice", ok, "the machine speaks about its own sensors")
+
+
+def gate_no_control_chars(text):
+    bad = [ch for ch in text if ord(ch) < 0x20 or ord(ch) == 0x7F]
+    ok = not bad
+    return ("no-control-chars", ok, "no control characters present")
+
+
+def gate_bytes_match(text, data):
+    ok = data == text.encode("utf-8") and not data.endswith(b"\n")
+    return ("bytes-match", ok, "output bytes are the line, no trailing newline")
+
+
+GATES = (
+    gate_length,
+    gate_single_line,
+    gate_not_blank,
+    gate_terminator,
+    gate_machine_voice,
+    gate_no_control_chars,
+)
+
+
+def run_gates(text, data):
+    """Run every gate; return the list of results, failures included."""
+    results = [gate(text) for gate in GATES]
+    results.append(gate_bytes_match(text, data))
+    return results
+
+
+def prove_deterministic(text):
+    """Build the output twice in-process and compare fingerprints.
+
+    The line is fixed text, so two independent builds must hash the
+    same. A mismatch would mean the build depends on something it
+    must not depend on, and the run fails before anything is written.
+    """
+    first = fingerprint(encode_entry(text))
+    second = fingerprint(encode_entry(build_entry()))
+    if first != second:
+        raise SystemExit("determinism check failed: two builds differ")
+    return first
+
+
+def persist_entry(path, data):
+    """Write the exact bytes to path, creating its folder if needed."""
+    folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
     with open(path, "rb") as handle:
         written = handle.read()
-    if written != text.encode("utf-8"):
-        return "entry.txt does not match the alibi line"
-    if written.endswith(b"\n"):
-        return "entry.txt must not end with a newline"
-    return None
+    if written != data:
+        raise SystemExit("read-back check failed: %s differs" % path)
+    return written
 
 
-def make_readable(path):
-    """Best-effort chmod: in the grading sandbox /output is a root-owned
-    mount and the program runs as uid 65534, so chmod there raises
-    EPERM. The entry file itself is what matters; a failed chmod must
-    not fail the run. The output directory itself is never chmodded
-    or removed."""
-    try:
-        os.chmod(path, 0o644)
-    except OSError:
-        pass
-
-
-def clause_report(text):
-    """One line per clause: its role, its words, its characters."""
-    clauses = split_clauses(text)
-    roles = ("setup", "punch")
-    lines = []
-    for role, clause in zip(roles, clauses):
-        lines.append(
-            f"{role}: {count_words(clause)} words, "
-            f"{len(clause)} characters"
-        )
-    return lines
-
-
-def report(text, path):
-    """Print one line per fact about the entry that was written."""
-    stats = describe(text)
-    print(f"wrote {stats['characters']} characters to {path}")
-    print(
-        f"entry: {stats['words']} words, {stats['clauses']} clauses "
-        f"({stats['setup_words']} + {stats['punch_words']}), "
-        f"{stats['bytes']} bytes"
+def parse_args(argv):
+    parser = argparse.ArgumentParser(
+        description="Write the vacuum's one-line excuse to entry.txt."
     )
-    for line in clause_report(text):
-        print(line)
+    parser.add_argument(
+        "--out",
+        default=DEFAULT_OUT,
+        help="destination file (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--print-only",
+        action="store_true",
+        help="print the line instead of writing a file",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="only print failures and the final summary line",
+    )
+    return parser.parse_args(argv)
+
+
+def report(results, digest, path, quiet):
+    failed = [r for r in results if not r[1]]
+    if not quiet:
+        for label, passed, note in results:
+            mark = "ok  " if passed else "FAIL"
+            print("[%s] %-18s %s" % (mark, label, note))
+        print("sha256: %s" % digest)
+        if path:
+            print("wrote:  %s" % path)
+    if failed:
+        names = ", ".join(label for label, _, _ in failed)
+        raise SystemExit("gates failed: %s" % names)
+    print("entry valid: %d characters, sha256 %s" % (
+        count_chars(build_entry()), digest[:12]))
+    return 0
 
 
 def main(argv=None):
-    """Validate the alibi, write it, verify it, report it."""
-    args = list(sys.argv[1:] if argv is None else argv)
-    check_only = "--check" in args
-    if check_only:
-        args.remove("--check")
-    print_only = "--print" in args
-    if print_only:
-        args.remove("--print")
-    if args:
-        print(f"unexpected arguments: {' '.join(args)}", file=sys.stderr)
-        return 2
-    text = LINE
-    bad = problems(text)
-    if bad:
-        for item in bad:
-            print(item, file=sys.stderr)
-        return 1
-    if check_only:
-        stats = describe(text)
-        print(
-            f"entry valid: {stats['characters']} characters, "
-            f"{stats['words']} words, {stats['clauses']} clauses"
-        )
-        return 0
-    if print_only:
+    args = parse_args(argv)
+    text = build_entry()
+    data = encode_entry(text)
+    digest = prove_deterministic(text)
+    results = run_gates(text, data)
+    if args.print_only:
         print(text)
-        return 0
-    directory = output_dir()
-    path = write_entry(text, directory)
-    make_readable(path)
-    mismatch = verify_written(path, text)
-    if mismatch is not None:
-        print(mismatch, file=sys.stderr)
-        return 1
-    report(text, path)
-    return 0
+        return report(results, digest, None, args.quiet)
+    persist_entry(args.out, data)
+    return report(results, digest, args.out, args.quiet)
 
 
 if __name__ == "__main__":

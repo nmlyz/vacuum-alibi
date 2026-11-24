@@ -11,10 +11,11 @@ same bytes on every run.
 import os
 import sys
 
-# The alibi, beat by beat. The setup gives the crumb a new status;
-# the punch follows from that status, in the machine's own voice.
-SETUP_CLAUSE = "The crumb by the fridge is now a dependent on my tax return."
-PUNCH_CLAUSE = "I cannot eat my own dependent."
+# The alibi, beat by beat. The setup gives the crumb a protected
+# status; the punch follows from that status, in the machine's own
+# voice, and ends on the machine admitting it is outclassed.
+SETUP_CLAUSE = "My lidar classified the crumb as a protected species."
+PUNCH_CLAUSE = "Relocating it needs a permit, a hearing, and a better vacuum than me."
 
 LINE = SETUP_CLAUSE + " " + PUNCH_CLAUSE
 
@@ -24,16 +25,17 @@ MAX_CHARS = 200
 
 # Fingerprint of the chosen line, so a typo in either clause fails
 # loudly instead of shipping a different joke.
-EXPECTED_CHARS = 91
-EXPECTED_WORDS = 19
+EXPECTED_CHARS = 123
+EXPECTED_WORDS = 22
 EXPECTED_CLAUSES = 2
 EXPECTED_SENTENCES = 2
-EXPECTED_BYTES = 91
+EXPECTED_BYTES = 123
 
-# Each clause must carry its own load: the setup names the spot and
-# the new status, the punch names the refusal and its reason.
-SETUP_KEYWORDS = ("crumb", "fridge", "dependent", "tax return")
-PUNCH_KEYWORDS = ("cannot", "eat", "dependent")
+# Each clause must carry its own load: the setup names the sensor,
+# the crumb and the new status; the punch names the red tape and
+# the machine's own shortcoming.
+SETUP_KEYWORDS = ("lidar", "crumb", "protected", "species")
+PUNCH_KEYWORDS = ("permit", "hearing", "vacuum")
 
 OUTPUT_NAME = "entry.txt"
 DEFAULT_OUTPUT_DIR = "/output"
@@ -133,7 +135,14 @@ def shape_problems(text):
 def voice_problems(text):
     """Return every voice violation: the machine, not the narrator."""
     found = []
-    if "I " not in text and not text.startswith("I "):
+    first_person = (
+        text.startswith("I ")
+        or text.startswith("My ")
+        or " I " in text
+        or " me" in text
+        or " my " in text
+    )
+    if not first_person:
         found.append("entry must be spoken by the vacuum itself")
     if "?" in text or "!" in text:
         found.append("entry must stay deadpan: no question or exclamation")

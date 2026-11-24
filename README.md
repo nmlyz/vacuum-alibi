@@ -6,16 +6,16 @@
 
 vacuum-alibi writes one line to a file: the excuse a robot vacuum gives for missing a spot. The line is the machine talking about itself, deadpan, with a specific detail up front and the punch at the end:
 
-> The crumb by the fridge is now a dependent on my tax return. I cannot eat my own dependent.
+> My lidar classified the crumb as a protected species. Relocating it needs a permit, a hearing, and a better vacuum than me.
 
 ## How it works
 
 The program keeps the alibi as two clauses — a setup and a punch — and checks each one on its own before writing anything:
 
-- **Setup** (13 words): the crumb by the fridge has a new status. It must name the crumb, the fridge, the dependent and the tax return, start with a capital and end with a full stop.
-- **Punch** (6 words): the vacuum refuses, for a reason that follows from the setup. It must name the refusal and the dependent, and stay in the first person.
+- **Setup** (9 words): the vacuum's own sensor gives the crumb a new status. It must name the lidar, the crumb, the protected species, start with a capital and end with a full stop.
+- **Punch** (13 words): the new status has consequences, and they are all red tape. It must name the permit, the hearing and the vacuum, and end on the machine admitting a better vacuum than itself is needed.
 
-On top of the per-clause checks, the whole line is gated: 1 to 200 characters (this one is 91), a single line, single spaces, plain ASCII, no question or exclamation, and a fixed fingerprint of 19 words, 2 clauses and 91 bytes. A typo in either clause fails loudly instead of shipping a different joke.
+On top of the per-clause checks, the whole line is gated: 1 to 200 characters (this one is 123), a single line, single spaces, plain ASCII, no question or exclamation, and a fixed fingerprint of 22 words, 2 clauses and 123 bytes. A typo in either clause fails loudly instead of shipping a different joke.
 
 ## Run it
 

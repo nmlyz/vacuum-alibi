@@ -27,10 +27,10 @@ DEFAULT_OUT = "/output/entry.txt"
 
 # The excuse itself, kept as two sentences so each can be checked on
 # its own before they are joined. Joined with a single space the two
-# sentences come to 123 characters, inside the 200-character cap.
+# sentences come to 96 characters, inside the 200-character cap.
 SENTENCES = (
-    "My lidar classified the crumb as a protected species.",
-    "Relocating it needs a permit, a hearing, and a better vacuum than me.",
+    "I logged that crumb as a warning to the others.",
+    "Let them see what happens when they settle here.",
 )
 
 
@@ -84,8 +84,13 @@ def gate_terminator(text):
 
 
 def gate_machine_voice(text):
-    ok = "vacuum" in text.lower() and "lidar" in text.lower()
-    return ("machine-voice", ok, "the machine speaks about its own sensors")
+    ok = text.startswith("I logged")
+    return ("machine-voice", ok, "the machine speaks in its own log voice")
+
+
+def gate_punch_at_end(text):
+    ok = text.rsplit(". ", 1)[-1].startswith("Let them see")
+    return ("punch-at-end", ok, "the punch sits in the final clause")
 
 
 def gate_no_control_chars(text):
@@ -105,6 +110,7 @@ GATES = (
     gate_not_blank,
     gate_terminator,
     gate_machine_voice,
+    gate_punch_at_end,
     gate_no_control_chars,
 )
 
